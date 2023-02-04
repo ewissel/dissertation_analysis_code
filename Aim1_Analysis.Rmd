@@ -1,0 +1,1296 @@
+---
+title: "Aim1_diss_dat"
+author: "Emily Wissel"
+date: "11/9/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+#install.packages("pacman")
+pacman::p_load("devtools","phyloseq","tidyverse","qiime2R", "ggplot2", 
+              "reshape2", "GUniFrac", "vegan", "LDM")
+
+med_dat$Preg_BV <- as.factor(med_dat$Preg_BV) ## because R thinks it is a numerical values, but "0" designates no diagnosis and "1" designates a diagnosis 
+
+med_dat %>% ggplot(aes(x=Preg_BV, fill = Preg_BV)) +
+  geom_bar(width = 0.5) +
+  theme_light() +                                                       ## change theme and background colors
+  scale_fill_manual(values = c("lightcyan2", "palevioletred1"),         ## use color names to change plot colors
+                    name = "BV Diagnosis", labels = c("No", "Yes")) +   ## fix legend labels so it's not "0" and "1"
+  labs(title = "BV Diagnosis during Pregnany", x = "BV Diagnosis") +    ## add information to the plot
+  theme(axis.ticks.x=element_blank(), axis.text.x=element_blank())      ## remove the "1" and "0" codes on the x axis
+
+med_dat$Preg_UTI <- as.factor(med_dat$Preg_UTI)
+med_dat %>% ggplot(aes(x=Preg_UTI, fill = Preg_UTI)) +
+  geom_bar(width = 0.5) +
+  theme_light() +                                                       ## change theme and background colors
+  scale_fill_manual(values = c("lightcyan2", "palevioletred1"),         ## use color names to change plot colors
+                    name = "UTI Diagnosis", labels = c("No", "Yes")) +   ## fix legend labels so it's not "0" and "1"
+  labs(title = "UTI Diagnosis during Pregnany", x = "UTI Diagnosis") +    ## add information to the plot
+  theme(axis.ticks.x=element_blank(), axis.text.x=element_blank())
+
+med_dat$Preg_Chlam <- as.factor(med_dat$Preg_Chlam)
+med_dat %>% ggplot(aes(x=Preg_Chlam, fill = Preg_Chlam)) +
+  geom_bar(width = 0.5) +
+  theme_light() +                                                       ## change theme and background colors
+  scale_fill_manual(values = c("lightcyan2", "palevioletred1"),         ## use color names to change plot colors
+                    name = "Chlamydia Diagnosis", labels = c("No", "Yes")) +   ## fix legend labels so it's not "0" and "1"
+  labs(title = "Chlamydia Diagnosis during Pregnany", x = "Chlamydia Diagnosis") +    ## add information to the plot
+  theme(axis.ticks.x=element_blank(), axis.text.x=element_blank())
+```
+
+## Aim 1 Analysis, Species Level 
+
+This will be the LDM (linear decomp model) analysis. 
+
+```{r read in the data }
+dat_otu <- read.csv("../biob_outputs/metadat_wPlates_passedQC.csv")
+dat_otu <- dat_otu %>% select(-X ) %>%
+  mutate(bodysite = ifelse(str_detect(sample, 'Vag'), "vaginal", 
+                           ifelse(str_detect(sample, "Rec"), "rectal", 
+                                  "control"))) %>%
+  relocate(bodysite, .after = "timepoint") %>%
+  mutate(timepoint = ifelse(timepoint=="1"|timepoint == "2" | timepoint == "PP" | timepoint == "3", timepoint, "control"))
+dat_otu$timepoint[dat_otu$timepoint == '3'] <- 'PP'
+dat_otu <- dat_otu %>% filter(timepoint != "PP")
+
+# head(dat_otu) ## makes the knit too long 
+```
+
+
+
+# Aim 1: Examine how microbes maintain population structures in the gut and vaginal microbiome. 
+
+### Hypothesis 1: The microbiome will be less diverse at T2 compred to T1. 
+
+For a version of this that shoulds more scientific, refer to my dissertation proposal. This is straightforward as it's the only consistent trend in pregnancy microbiome literature. Maria Gloria-Dominguez seems to think the microbiome gets more divers ~30 weeks, but this is based on vibes and not data. 
+
+here is a (link for the alpha diversity tutorial)[https://scienceparkstudygroup.github.io/microbiome-lesson/04-alpha-diversity/index.html]. Alpha-diversity is calculated on the raw data, here data_otu or data_phylo if you are using phyloseq.
+It is important to not use filtered data because many richness estimates are modeled on singletons and doubletons in the occurrence table. So, you need to leave them in the dataset if you want a meaningful estimate.
+Moreover, we usually not using normalized data because we want to assess the diversity on the raw data and we are not comparing samples to each other but only assessing diversity within each sample.
+
+So let's test this out!
+
+
+```{r calculate alpha abundances }
+motu <- dat_otu %>% select(-Plate, -timepoint, -subjectID, -bodysite) 
+motu <- motu[order(motu$sample),]
+motu <- motu %>% select(-sample)
+motu <- data.matrix(motu)
+rownames(motu) <- dat_otu$sample
+
+
+#motu <- as.integer(motu)
+
+#motu#motu ## taxa are columns, samples are row
+
+mindf <- dat_otu %>% select(Plate, subjectID, timepoint, bodysite, sample)
+#dat_otu %>%
+#  pivot_longer(cols = Gardnerella_vaginalis:last_col(), names_to = genus) 
+  
+  
+#data_richness <- motu%>% estimateR()  # calculate richness and Chao1 using vegan package
+## this one required count data, which we don't have
+
+data_evenness <- diversity(motu) / log(specnumber(motu))  # calculate evenness index using vegan package
+data_shannon <- diversity(motu, index = "shannon")        # calculate Shannon index using vegan package
+data_alphadiv <- cbind(mindf, data_shannon, data_evenness) # combine all indices in one data table
+
+## remove dat for simplicity and space in r
+rm(data_evenness, data_shannon, mindf)               # remove the unnecessary data/vector
+
+head(data_alphadiv)
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+library(psych) ## here because it masks some packages in phyloseq
+describe(data_alphadiv$data_evenness)
+describe(data_alphadiv$data_shannon)
+
+data_alphadiv %>% 
+  filter(timepoint == 1 | timepoint == 2) %>%
+  ggplot(aes(x = timepoint, y = data_shannon)) +
+  geom_boxplot() + 
+  geom_jitter() +
+  facet_wrap(.~bodysite) +
+  theme_minimal() +
+  labs(title = "Shannon Diversity")
+```
+
+Pielou’s evenness provides information about the equity in species abundance in each sample, in other words are some species dominating others or do all species have quite the same abundances.Richness represents the number of species observed in each sample. Shannon index provides information about both richness and evenness.
+
+
+Now let's do some basic plots and stats to see if there is a difference in diversity between timepoints. 
+
+```{r alpha end game stats}
+cbPalette <- c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7","#999999")
+
+data_alphadiv %>%
+  filter(bodysite != 'control' & timepoint != 'control') %>%
+  ggplot(aes(x = timepoint, y = data_shannon, fill = bodysite)) +
+  geom_boxplot(outlier.size=-1) + 
+  geom_jitter(height = 0, width = 0.3, alpha= 0.6 ) +
+  facet_wrap(.~bodysite) +
+  theme_minimal() + 
+  scale_fill_manual(values=cbPalette) +
+  labs(title = "Shannon Diversity")
+
+data_alphadiv %>%
+  filter(bodysite != 'control' & timepoint != 'control') %>%
+  ggplot(aes(x = timepoint, y = data_evenness, fill = bodysite)) +
+  geom_boxplot(outlier.size=-1) + 
+  geom_jitter(height = 0, width = 0.3, alpha= 0.6) +
+  facet_wrap(.~bodysite) +
+  theme_minimal() + 
+  scale_fill_manual(values=cbPalette) +
+  labs(title = "Evenness (alpha diversity)")
+
+summary(aov(data_shannon ~ timepoint, data = data_alphadiv)) # not a significant p value
+summary(aov(data_evenness ~ timepoint, data = data_alphadiv)) # not a significant p value
+
+```
+
+The P-value of `0.803` indicates that there is not a significant difference in shannon alpha diversity between timepoints. Similarly, a p value of `0.603` for evenness indicates there is not a significant difference in evenness between timepoints. 
+
+
+
+## normalization and beta diversity 
+ Since beta diversity is comparing diversity across sample, we DO need normalization and batch correction. I will be following [this tutorial](https://scienceparkstudygroup.github.io/microbiome-lesson/05-data-filtering-and-normalisation/index.html). 
+
+We have already filtered out species detected less than 1% so I'm going to skip this step of the tutorial. It's also focused on 16S whereas I do metagenomics. 
+
+First we need to see if there is a difference in the counts per sample. Unforunately this is going to be difficult to get and integrate as these numbers were not made accessible or as part of tiny data. But let's see what we can do. 
+
+* as explained McKnight and collaborators (DOI: 10.1111/2041-210X.13115) DESeq2 or edgeR‐TMM are recommended based on studies that focused on differential abundance testing and variance standardization, rather than community-level comparisons (i.e. beta-diversity) 
+
+* 
+ 
+```{r get number of reads}
+readdat <- read.csv("../quality_control/calc_reads/general_stats_table.tsv", sep = "\t")
+readdat2 <- read.csv("../quality_control/calc_reads/fastqc_sequence_counts_plot_reupload_files.tsv", sep = "\t")
+readdat2$Total.Sequences..millions <- (readdat2$Unique.Reads + readdat2$Duplicate.Reads) / 1000000
+#readdat$Total.Sequences..millions <- (readdat$Total.Sequences..millions*1000000)
+## remove currently useless columns
+readdat <- readdat %>% select(-Average...GC.Content, - Percentage.of.modules.failed.in.FastQC.report..includes.those.not.plotted.here., - Average.Sequence.Length..bp.)
+colnames(readdat) <- c("Sample", "Duplicate.Reads", "Total.Sequences")
+colnames(readdat2) <- c("Sample", "Unique.Reads", "Duplicate.Reads", "Total.Sequences")
+
+## now merge the two 
+reads <- bind_rows(readdat, readdat2)
+reads <- reads %>%
+  mutate(read =  ifelse(str_detect(Sample, "_1"), "forward", "reverse")) %>%
+  mutate(bodysite = ifelse(str_detect(Sample, "Rec"), "rectal", 
+                           ifelse(str_detect(Sample, "Vag"), "vaginal", "control"))) %>%
+  mutate(timepoint = ifelse(str_detect(Sample, "-1-"), "1",
+                            ifelse(str_detect(Sample, "-2-"), "2", "idk")))
+
+head(reads)
+
+reads %>%
+  filter(timepoint != "idk") %>%
+  ggplot(aes( y = Total.Sequences, x = timepoint, fill = bodysite)) +
+  geom_boxplot(outlier.size=-1) +
+  geom_jitter(height = 0, width = 0.3, alpha = 0.5) + 
+  ## don't plot outliers since they are reflected in geom_jitter
+  theme_minimal() + 
+  scale_fill_manual(values=cbPalette) +
+  labs(title = "Total Reads in All Samples", y = "Total Sequences, Millions", x = "Timepoint") +
+  facet_wrap(.~bodysite)
+
+vreads <- reads %>% filter(bodysite == "vaginal")
+rreads <- reads %>% filter(bodysite == "rectal")
+
+describe(rreads$Total.Sequences)
+describe(vreads$Total.Sequences)
+```
+ 
+                   
+Rareify the data, in a separate code block since its chunky. 
+
+```{r normalize data maybe}
+## first make data a phyloseq object
+#library(phyloseq)
+#data_phylo_filt <- otu_table(object = motu, taxa_are_rows = FALSE)
+
+set.seed(11062015) # set seed for analysis reproducibility, and obviously this is the date the first minion movie came out so it is the ideal seed
+## "Please note that the authors of phyloseq do not advocate using this as a normalization procedure, despite its recent popularity. "
+## ok so we will use DEseq2
+## jk I can't do this because the processing we used doesn't provide count data :sadface:
+```
+jk I can't do this because the processing we used doesn't provide count data :sadface:
+We can use this for justification too https://journals.plos.org/ploscompbiol/article/file?id=10.1371/journal.pcbi.1003531&type=printable 
+
+## get some info on the cohort
+
+```{r vag infection rates}
+#read in medical data
+med_dat <- read_csv("../medical_data/MPTB_Sociodemographic Outcome Health Behaviors update4, 16S, WGS indicator.csv")
+med_dat <- med_dat %>% filter(Sequencing_WGS == "1"  )
+
+# cofounder variables: age, income, parity, TobaccoUse_MRm AlcoholUse_MR, MarijuanaUse_MR, 
+# covariate variables: birthoutcome, labor, Preg_Chlam, Preg_UTI
+
+# merge med_dat and small
+med_dat$subjectID <- med_dat$subjectid
+small <- dat_otu %>% select(sample, subjectID, Plate, timepoint, bodysite)
+small <- small [order(small$sample),]
+med_data <- merge(small, med_dat, all = TRUE, by.x = "subjectID", by.y = "subjectid" )
+#med_data # 937 rows
+med_data[order(med_data$sample),] ## motu and med_dat should have same order of samples in rows
+#write.csv(med_dat, "med_data_for_mj.csv")
+
+med_dat_vag <- med_data %>% filter(bodysite == "vaginal")
+med_dat_rectal <- med_data %>% filter(bodysite == "rectal")
+
+table(med_data$Preg_BV)
+table(med_data$Preg_UTI)
+table(med_data$Preg_Chlam)
+#med_dat_vag #%>% unique(subjectID)
+
+med_data %>% 
+  #filter(timepoint == "1" & bodysite == "vaginal") %>%
+  filter(Preg_UTI == "1" ) #& Preg_Chlam == "1" & Preg_BV == "1")
+
+```
+
+plot it. 
+
+
+
+
+## Set up for LDM
+
+To read a benchmarking paper comparing differential modelling methods in microbiome data, (look here)[https://www.biorxiv.org/content/10.1101/2022.07.22.501190v1.full]. To read the OG manuscript introducing LDM, (look here)[https://microbiomejournal.biomedcentral.com/articles/10.1186/s40168-021-01034-9]. 
+
+*What is LDM?*
+
+"The LDM models microbial abundance in the form of counts transformed into relative abundances as an outcome of interest given experimental covariates of interest. LDM provides users with both global and local hypothesis tests of differential abundance given covariates of interest and microbial count data. LDM decomposes the model sum of squares into parts explained by each variable in the model. From these sub-models we can see the amount of variability that each variable is contributing to the overall variability explained by the model’s covariates of interest... LDM can handle covariates both categorical and continuous and can control for confounders." 
+
+- (source)[https://rpubs.com/jrandall7/EICC16s]
+
+
+"Next, to remove any statistical noise we may still have to detect relationships between the covariates and microbial composition, we decide to keep only those taxa which appear in at least 2 samples. This is a parameter that will vary by project."
+
+* Do we want to do this with this data? I am inclined to say no, but here is the code in case we want it later: `otu_pres = which(colSums(asvt>0)>=1)` then `asvt = asvt[,otu_pres]` for dat_otu in its current form instead of asvt. 
+
+* "The OTU table should have rows corresponding to samples and columns corresponding to
+OTUs (ldm will transpose the OTU table if the number of rows is not equal to the length of
+the covariates in the metadata but this consistency check will fail in the unlikely case that the
+number of OTUs and samples are equal)"
+
+
+
+```{r set up ldm models and dat } 
+(seed=sample.int(11062015, size=1))
+small_otu <- dat_otu %>% select(-sample, -subjectID)
+rownames(small_otu) <- dat_otu$sample
+
+# Recode factor levels by name
+#small_otu$Plate <- recode_factor(small_otu$Plate, plate10  = "10", plate11= "11",
+#                               plate12 = "12", `plate3-4` = "34", plate5 = "5",
+#                               plate6 = "6", plate7 = "7", `plate8-9` = "89", prelim = "0")
+#small_otu$bodysite <- recode_factor(small_otu$bodysite, rectal = "0", vaginal = "2", control = "3")
+small_otu$timepoint <- recode_factor(small_otu$timepoint, "1" = "1", "2" = "2", "idk" = "0")
+
+#small_otu$Plate <- as.numeric(small_otu$Plate)
+#small_otu$bodysite <- as.numeric(small_otu$bodysite)
+small_otu$timepoint <- as.numeric(small_otu$timepoint)
+#head(dat_otu)
+small <- dat_otu %>% select(sample, subjectID, Plate, timepoint, bodysite)
+small <- small [order(small$sample),]
+## 
+
+####################
+motu_rectal <- dat_otu %>% filter(bodysite == "rectal" & timepoint != "idk" & timepoint != "0") %>% select(-Plate, -timepoint, -subjectID, -bodysite) 
+motu_rectal   <- motu_rectal [order(motu_rectal $sample),]
+motu_rectal  <- motu_rectal  %>% select(-sample)
+motu_rectal  <- data.matrix(motu_rectal )
+
+
+motu_vaginal <- dat_otu %>% filter(bodysite == "vaginal" & timepoint != "idk" & timepoint != "0") %>% select(-Plate, -timepoint, -subjectID, -bodysite) 
+motu_vaginal <- motu_vaginal[order(motu_vaginal$sample),]
+motu_vaginal <- motu_vaginal %>% select(-sample)
+motu_vaginal <- data.matrix(motu_vaginal)
+#rownames(motu) <- dat_otu$sample
+```
+
+
+now that LDM is set up, lets run it
+
+```{r actually running ldm rectal } 
+##### running the ldm function
+# confounders: Parity, BMI, Age, Tobacco Use, Alcohol Use, Marijuana Use, Socioeconomic status (income, % fed poverty level), Cohabitation, EOD scale
+# co variates:Birth outcome,BV, UTI, chlamydia, timepoint  
+## matched LDM for variables that change between timepoints (like timepoint)
+form_matched_rectal <- motu_rectal | (Plate + age + income + parity+ TobaccoUse_MR + AlcoholUse_MR + MarijuanaUse_MR + Preg_Chlam + Preg_UTI + Preg_BV) ~ timepoint
+
+res.ldm.matched.rectal.spec.meta <-ldm(formula= form_matched_rectal, 
+          data= med_dat_rectal, 
+          cluster.id = "subjectID",
+          seed=11062015,
+          perm.within.type="free", perm.between.type="none") # matched sets for diff between timepoints
+
+res.ldm.matched.rectal.spec.meta$n.perm.completed     # number of permutations
+res.ldm.matched.rectal.spec.meta$global.tests.stopped # did the global tests neet the stopping criteria? 
+res.ldm.matched.rectal.spec.meta$otu.tests.stopped    # did the otu-specific tests neet the stopping criteria?
+res.ldm.matched.rectal.spec.meta$p.global.omni        # global test p value 
+res.ldm.matched.rectal.spec.meta$detected.otu.omni    # signiticant OTUs detected
+
+
+
+
+### look at significant OTUs
+raw.pvalue.matched.rectal.spec.meta=as.data.frame(signif(res.ldm.matched.rectal.spec.meta$p.otu.omni,3))
+raw.pvalue.matched.rectal.spec.meta <- cbind(covariate = c("timepoint"), raw.pvalue.matched.rectal.spec.meta)
+raw.pvalue.matched.rectal.spec.meta <- raw.pvalue.matched.rectal.spec.meta %>%
+  pivot_longer(cols = Gardnerella_vaginalis:last_col(),
+               names_to = "species",
+               values_to = "raw_p_value")
+
+########################
+adj.pvalue.matched.rectal.meta.spec=as.data.frame(signif(res.ldm.matched.rectal.spec.meta$q.otu.omni,3))
+adj.pvalue.matched.rectal.meta.spec <- cbind(covariate = c("timepoint"), adj.pvalue.matched.rectal.meta.spec)
+
+
+adj.pvalue.matched.rectal.meta.spec <- adj.pvalue.matched.rectal.meta.spec %>%
+  pivot_longer(cols = Gardnerella_vaginalis:last_col(),
+               names_to = "species",
+               values_to = "adj_p_value")
+
+## merge
+sig_otu_rec_mta_spec <- full_join(raw.pvalue.matched.rectal.spec.meta, adj.pvalue.matched.rectal.meta.spec, by = c("species", "covariate"))
+options(scipen = 50)
+only_sig_otu <- sig_otu_rec_mta_spec %>%
+  filter(adj_p_value < 0.05)
+only_sig_otu
+
+tidy_otu_rec <- dat_otu %>%
+  pivot_longer(cols = Gardnerella_vaginalis:last_col(),
+               names_to = 'species',
+               values_to = "rel_abun") %>%
+  filter(rel_abun > 0) 
+tidy_otu_rec$species <- as.factor(tidy_otu_rec$species)
+#write.csv(tidy_otu,"tidy_otu_rel_abun_after_QC.csv")
+
+spec_counts <- tidy_otu_rec %>%
+  count(species)
+spec_counts$number_times_occur <- spec_counts$n
+spec_counts <- spec_counts %>% select(-n)
+## merge 
+only_sig_otu_matched <- left_join(only_sig_otu, spec_counts, by = genus)
+only_sig_otu_matched
+
+sig_otu_rec_mta_spec
+```
+Now do the same for vaginal
+```{r actually running ldm vaginal} 
+##### running the ldm function
+# confounders: Parity, BMI, Age, Tobacco Use, Alcohol Use, Marijuana Use, Socioeconomic status (income, % fed poverty level), Cohabitation, EOD scale
+# co variates:Birth outcome,BV, UTI, chlamydia, timepoint  
+## matched LDM for variables that change between timepoints (like timepoint)
+form_matched_vag <- motu_vaginal | (Plate + age + income + parity+ TobaccoUse_MR + AlcoholUse_MR + MarijuanaUse_MR + Preg_Chlam + Preg_UTI + Preg_BV) ~ timepoint
+
+res.ldm.matched.vag.spec.meta <-ldm(formula= form_matched_vag, 
+          data= med_dat_vag, 
+          cluster.id = "subjectID",
+          seed=11062015,
+          perm.within.type="free", perm.between.type="none") # matched sets for diff between timepoints
+
+res.ldm.matched.vag.spec.meta$n.perm.completed     # number of permutations
+res.ldm.matched.vag.spec.meta$global.tests.stopped # did the global tests neet the stopping criteria? 
+res.ldm.matched.vag.spec.meta$otu.tests.stopped    # did the otu-specific tests neet the stopping criteria?
+res.ldm.matched.vag.spec.meta$p.global.omni        # global test p value 
+res.ldm.matched.vag.spec.meta$detected.otu.omni    # signiticant OTUs detected
+
+
+
+
+### look at significant OTUs
+raw.pvalue.matched.vag.spec.meta=as.data.frame(signif(res.ldm.matched.vag.spec.meta$p.otu.omni,3))
+raw.pvalue.matched.vag.spec.meta <- cbind(covariate = c("timepoint"), raw.pvalue.matched.vag.spec.meta)
+raw.pvalue.matched.vag.spec.meta <- raw.pvalue.matched.vag.spec.meta %>%
+  pivot_longer(cols = Gardnerella_vaginalis:last_col(),
+               names_to = "species",
+               values_to = "raw_p_value")
+
+########################
+adj.pvalue.matched.vag.meta.spec=as.data.frame(signif(res.ldm.matched.vag.spec.meta$q.otu.omni,3))
+adj.pvalue.matched.vag.meta.spec <- cbind(covariate = c("timepoint"), adj.pvalue.matched.vag.meta.spec)
+
+adj.pvalue.matched.vag.meta.spec <- adj.pvalue.matched.vag.meta.spec %>%
+  pivot_longer(cols = Gardnerella_vaginalis:last_col(),
+               names_to = "species",
+               values_to = "adj_p_value")
+adj.pvalue.matched.vag.meta.spec
+## merge
+sig_otu_vag_mta_spec <- full_join(raw.pvalue.matched.vag.spec.meta, adj.pvalue.matched.vag.meta.spec, by = c("species"))
+options(scipen = 50)
+only_sig_otu_vag <- sig_otu_vag_mta_spec %>%
+  filter(adj_p_value < 0.05)
+only_sig_otu_vag
+
+tidy_otu_vag <- dat_otu %>%
+  pivot_longer(cols = Gardnerella_vaginalis:last_col(),
+               names_to = genus,
+               values_to = "rel_abun") %>%
+  filter(rel_abun > 0) 
+tidy_otu_vag$species <- as.factor(tidy_otu_vag$species)
+#write.csv(tidy_otu,"tidy_otu_rel_abun_after_QC.csv")
+
+spec_counts_vag <- tidy_otu_vag %>%
+  count(species)
+spec_counts_vag$number_times_occur <- spec_counts_vag$n
+spec_counts_vag <- spec_counts_vag %>% select(-n)
+## merge 
+only_sig_otu_matched_vag <- left_join(only_sig_otu_vag, spec_counts_vag, by = genus)
+only_sig_otu_matched_vag
+
+sig_otu_vag_mta_spec
+```
+
+Now we want to do things with the output to make sense of what we just processed in LDM. 
+
+```{r}
+### cluster LDM for variables that remain the same between time points
+form_cluster_rectal <- motu_rectal | (timepoint  + Plate  + age + income + parity+ TobaccoUse_MR + AlcoholUse_MR + MarijuanaUse_MR ) ~ Preg_Chlam + Preg_UTI + Preg_BV 
+
+res.ldm.cluster <-ldm(formula= form_cluster_rectal, 
+          data= med_dat_rectal, 
+          cluster.id = "subjectID",
+          seed=11062015,
+          perm.within.type="free", perm.between.type="none") # matched sets for diff between timepoints
+
+res.ldm.cluster$n.perm.completed     # number of permutations 25,000
+res.ldm.cluster$global.tests.stopped # did the global tests neet the stopping criteria? 
+res.ldm.cluster$otu.tests.stopped    # did the otu-specific tests neet the stopping criteria?
+res.ldm.cluster$p.global.omni        # global test p value 
+res.ldm.cluster$detected.otu.omni    # signiticant OTUs detected
+
+### look at significant OTUs
+raw.pvalue=as.data.frame(signif(res.ldm.cluster$p.otu.omni,3))
+raw.pvalue <- cbind(covariate = c( "Preg_Chlam", "Preg_UTI", "Preg_BV"), raw.pvalue)
+
+raw.pvalue <- raw.pvalue %>%
+  pivot_longer(cols = Gardnerella_vaginalis:last_col(),
+               names_to = "species",
+               values_to = "raw_p_value")
+#raw.pvalue
+########################
+adj.pvalue=as.data.frame(signif(res.ldm.cluster$q.otu.omni,3))
+adj.pvalue <- cbind(covariate = c( "Preg_Chlam", "Preg_UTI", "Preg_BV"), adj.pvalue)
+
+adj.pvalue <- adj.pvalue %>%
+  pivot_longer(cols = Gardnerella_vaginalis:last_col(),
+               names_to = "species",
+               values_to = "adj_p_value")
+
+## merge
+sig_otu_clust <- full_join(raw.pvalue, adj.pvalue, by = c("species", "covariate"))
+options(scipen = 50)
+only_sig_otu <- sig_otu_clust %>%
+  filter(adj_p_value < 0.05)
+
+#head(dat_otu)
+tidy_otu <- dat_otu %>%
+  filter(bodysite == "rectal") %>%
+  pivot_longer(cols = Gardnerella_vaginalis:last_col(),
+               names_to = "species",
+               values_to = "rel_abun") %>%
+  filter(rel_abun > 0) 
+tidy_otu$species <- as.factor(tidy_otu$species)
+#write.csv(tidy_otu,"tidy_o-     
+spec_counts <- tidy_otu %>%
+  count(species)
+spec_counts$number_times_occur <- spec_counts$n
+spec_counts <- spec_counts %>% select(-n)
+## merge 
+only_sig_otu <- left_join(only_sig_otu, spec_counts, by = 'species')
+only_sig_otu
+#spec_counts
+
+write.csv(only_sig_otu, file = "significant_otus_cluster_ldm_rectal.csv")
+```
+
+now for vaginal
+
+```{r vag cluster}
+### cluster LDM for variables that remain the same between time points
+form_cluster_vag <- motu_vaginal | (timepoint  + Plate  + age + income + parity+ TobaccoUse_MR + AlcoholUse_MR + MarijuanaUse_MR ) ~ Preg_Chlam + Preg_UTI + Preg_BV 
+
+res.ldm.cluster.vag <-ldm(formula= form_cluster_vag, 
+          data= med_dat_vag, 
+          cluster.id = "subjectID",
+          seed=11062015,
+          perm.within.type="free", perm.between.type="none") # matched sets for diff between timepoints
+
+res.ldm.cluster.vag$n.perm.completed     # number of permutations 25,000
+res.ldm.cluster.vag$global.tests.stopped # did the global tests neet the stopping criteria? 
+res.ldm.cluster.vag$otu.tests.stopped    # did the otu-specific tests neet the stopping criteria?
+res.ldm.cluster.vag$p.global.omni        # global test p value 
+res.ldm.cluster.vag$detected.otu.omni    # signiticant OTUs detected
+
+### look at significant OTUs
+raw.pvalue.vag.cluster=as.data.frame(signif(res.ldm.cluster.vag$p.otu.omni,3))
+raw.pvalue.vag.cluster <- cbind(covariate = c( "Preg_Chlam", "Preg_UTI", "Preg_BV"), raw.pvalue.vag.cluster)
+raw.pvalue.vag.cluster <- raw.pvalue.vag.cluster %>%
+  pivot_longer(cols = Gardnerella_vaginalis:last_col(),
+               names_to = "species",
+               values_to = "raw_p_value")
+#raw.pvalue
+########################
+adj.pvalue.vag.cluster=as.data.frame(signif(res.ldm.cluster.vag$q.otu.omni,3))
+adj.pvalue.vag.cluster <- cbind(covariate = c("Preg_Chlam", "Preg_UTI", "Preg_BV"), adj.pvalue.vag.cluster)
+
+adj.pvalue.vag.cluster <- adj.pvalue.vag.cluster %>%
+  pivot_longer(cols = Gardnerella_vaginalis:last_col(),
+               names_to = "species",
+               values_to = "adj_p_value")
+
+## merge
+sig_otu_clust_vag <- full_join(raw.pvalue.vag.cluster, adj.pvalue.vag.cluster, by = c("species", "covariate"))
+options(scipen = 50)
+only_sig_otu_vag <- sig_otu_clust_vag %>%
+  filter(adj_p_value < 0.05)
+
+#head(dat_otu)
+tidy_otu_vag_clust <- dat_otu %>%
+  filter(bodysite == "vaginal") %>%
+  pivot_longer(cols = Gardnerella_vaginalis:last_col(),
+               names_to = "species",
+               values_to = "rel_abun") %>%
+  filter(rel_abun > 0) 
+tidy_otu_vag_clust$species <- as.factor(tidy_otu_vag_clust$species)
+#write.csv(tidy_otu,"tidy_o-     
+spec_counts_vag_clust <- tidy_otu_vag_clust %>%
+  count(species)
+spec_counts_vag_clust$number_times_occur <- spec_counts_vag_clust$n
+spec_counts_vag_clust <- spec_counts_vag_clust %>% select(-n)
+## merge 
+only_sig_otu_vag <- left_join(only_sig_otu_vag, spec_counts_vag_clust, by = 'species')
+only_sig_otu_vag
+#spec_counts
+
+#spec_counts_vag_clust # Gammapapillomavirus_6
+write.csv(only_sig_otu_vag, file = "significant_otus_cluster_ldm_vaginal_species.csv")
+```
+
+
+### test at genus level
+
+```{r read in genus dat}
+
+gendat <- read.csv("../biob_outputs/merged_abundance_table.txt", sep = "\t")
+
+gendat <- gendat %>%
+  filter(ID != "#SampleID") %>% 
+  separate(col = ID, 
+                  into = c("kindgom", "phylum", "class", "order", "family", "genus", "species", "strain"),
+                  sep = "[|].__",
+                  remove = FALSE,
+                  fill = "right") 
+gendat_piv1 <- gendat %>%
+  pivot_longer(cols = Blank.W34P.USPD16084006.A57_profile:last_col(),
+              names_to = "sample",
+              values_to = "rel_abun")  %>%
+  filter(!is.na(genus) & is.na(species)) %>%
+  group_by(sample, genus) %>%
+  mutate(rel_abun = sum(as.numeric(rel_abun))) %>%
+  ungroup()
+
+options(scipen = 50)
+gendat_piv <- gendat_piv1 %>%
+  select(sample, genus, rel_abun) %>%
+  na.omit() %>%
+  filter(rel_abun >= 1) %>%
+  separate(col = sample, remove = FALSE, into = c("sample", "timepoint", "trash"),sep = "[.]") %>%
+  filter(timepoint == "1" | timepoint == "2") %>%
+  mutate(bodysite = ifelse(grepl("Rec", trash), "rectal",
+                           ifelse(grepl("Vag", trash), "vaginal",
+                                  "other"))) %>%
+  filter(bodysite != "other") %>%
+  mutate(sampleID = paste0(sample, ".", timepoint,".", trash))
+
+head(gendat_piv)
+gendat_piv <- gendat_piv[order(gendat_piv$sample),]
+gendat_otu <- gendat_piv %>%
+  filter(timepoint != "PP") %>%
+  select(-timepoint, -trash, - bodysite, -sample)%>%
+  pivot_wider(id_cols = sampleID, 
+              names_from = genus, 
+              values_from = rel_abun,
+              values_fill = 0)
+
+gendat_otu_rectal <- gendat_piv %>%
+  filter(bodysite == "rectal" & timepoint != "PP") %>%
+  select(-timepoint, -trash, - bodysite, -sample)%>%
+  pivot_wider(id_cols = sampleID, 
+              names_from = genus, 
+              values_from = rel_abun,
+              values_fill = 0)
+
+gendat_otu_vag <- gendat_piv %>%
+  filter(bodysite == "vaginal") %>%
+  select(-timepoint, -trash, - bodysite, -sample)%>%
+  pivot_wider(id_cols = sampleID, 
+              names_from = genus, 
+              values_from = rel_abun,
+              values_fill = 0)
+
+```
+
+now set up for LDM. we need the motu and to confirm the genuses are in the same order. sample x genus matrix. 
+
+```{r set up for genus LDM}
+motu_gen <- gendat_otu
+motu_gen <- motu_gen[order(motu_gen$sampleID),]
+motu_gen <- motu_gen %>% select(-sampleID)
+motu_gen <- data.matrix(motu_gen)
+rownames(motu_gen) <- gendat_otu$sampleID
+#motu <- as.integer(motu)
+
+## clean it first
+med_dat_rectal <- med_dat_rectal %>% filter(timepoint != "PP" )
+med_dat_rectal <- med_dat_rectal %>%  mutate(sampleID_int = str_replace(sample, "-", ".")) %>%  mutate(sampleID = str_replace(sampleID_int, "-", ".")) %>%
+  select(sampleID, everything())
+## med dat sample IDs in gen dat
+med_dat_rectal <- med_dat_rectal %>% filter(sampleID %in% gendat_otu_rectal$sampleID)
+gendat_otu_rectal <- gendat_otu_rectal %>% filter(sampleID %in% med_dat_rectal$sampleID)
+# add to motu
+motu_gen_rectal <- gendat_otu_rectal
+motu_gen_rectal<- motu_gen_rectal[order(motu_gen_rectal$sampleID),]
+motu_gen_rectal <- motu_gen_rectal %>% select(-sampleID)
+motu_gen_rectal <- data.matrix(motu_gen_rectal)
+#rownames(motu_gen) <- gendat_otu$sampleID
+
+## repeat for vag
+## clean it first
+med_dat_vag <- med_dat_vag %>% filter(timepoint != "PP" & timepoint != "0" & timepoint != "idk")
+med_dat_vag <- med_dat_vag%>%  mutate(sampleID_int = str_replace(sample, "-", ".")) %>%  mutate(sampleID = str_replace(sampleID_int, "-", ".")) %>%
+  select(sampleID, everything())
+## med dat sample IDs in gen dat
+med_dat_vag <- med_dat_vag %>% filter(sampleID %in% gendat_otu_vag$sampleID)
+gendat_otu_vag <- gendat_otu_vag %>% filter(sampleID %in% med_dat_vag$sampleID)
+motu_gen_vag <- gendat_otu_vag
+motu_gen_vag<- motu_gen_vag[order(motu_gen_vag$sampleID),]
+motu_gen_vag <- motu_gen_vag %>% select(-sampleID)
+motu_gen_vag <- data.matrix(motu_gen_vag)
+
+
+```
+
+Now the cluster LDM
+
+
+```{r gen ldm cluster}
+form_cluster_gen_rectal <- motu_gen_rectal | (timepoint + Plate  + age + income + parity+ TobaccoUse_MR + AlcoholUse_MR + MarijuanaUse_MR ) ~ Preg_Chlam + Preg_UTI + Preg_BV 
+
+res.ldm.cluster.gen.rectal <-ldm(formula= form_cluster_gen_rectal, 
+          data= med_dat_rectal, 
+          cluster.id = "subjectID",
+          seed=11062015,
+          perm.within.type="free", perm.between.type="none") # matched sets for diff between timepoints
+
+res.ldm.cluster.gen.rectal$n.perm.completed     # number of permutations 25,000
+res.ldm.cluster.gen.rectal$global.tests.stopped # did the global tests neet the stopping criteria? 
+res.ldm.cluster.gen.rectal$otu.tests.stopped    # did the otu-specific tests neet the stopping criteria?
+res.ldm.cluster.gen.rectal$p.global.omni        # global test p value 
+res.ldm.cluster.gen.rectal$detected.otu.omni    # signiticant OTUs detected
+
+### look at significant OTUs
+raw.pvalue.gen.rectal=as.data.frame(signif(res.ldm.cluster.gen.rectal$p.otu.omni,3))
+raw.pvalue.gen.rectal <- cbind(covariate = c("Preg_Chlam", "Preg_UTI", "Preg_BV"), raw.pvalue.gen.rectal)
+raw.pvalue.gen.rectal <- raw.pvalue.gen.rectal %>%
+  pivot_longer(cols = Bifidobacterium:last_col(),
+               names_to = "genus",
+               values_to = "raw_p_value")
+raw.pvalue.gen.rectal
+########################
+adj.pvalue.gen.rectal=as.data.frame(signif(res.ldm.cluster.gen.rectal$q.otu.omni,3))
+adj.pvalue.gen.rectal <- cbind(covariate = c("Preg_Chlam", "Preg_UTI", "Preg_BV"), adj.pvalue.gen.rectal)
+
+adj.pvalue.gen.rectal <- adj.pvalue.gen.rectal %>%
+  pivot_longer(cols =  Bifidobacterium:last_col(),
+               names_to = "genus",
+               values_to = "adj_p_value")
+
+## merge
+sig_otu_clust_gen_rec <- full_join(raw.pvalue.gen.rectal, adj.pvalue.gen.rectal, by = c("genus", "covariate"))
+options(scipen = 50)
+only_sig_otu_gen_rec <- sig_otu_clust_gen_rec %>%
+  filter(adj_p_value < 0.05)
+
+tidy_otu_gen_rec <- gendat_otu_rectal %>%
+  pivot_longer(cols = Bifidobacterium:last_col(),
+               names_to = "genus",
+               values_to = "rel_abun") %>%
+  filter(rel_abun > 0) 
+tidy_otu_gen_rec$genus <- as.factor(tidy_otu_gen_rec$genus)
+
+#write.csv(tidy_otu,"tidy_o-     
+gen_counts_rec <- tidy_otu_gen_rec %>%
+  count(genus)
+gen_counts_rec$number_times_occur <- gen_counts_rec$n
+gen_counts_rec <- gen_counts_rec %>% select(-n)
+## merge 
+only_sig_otu_gen_rec <- left_join(only_sig_otu_gen_rec, gen_counts_rec, by = "genus")
+only_sig_otu_gen_rec
+
+write.csv(only_sig_otu_gen_rec, file = "significant_otus_cluster_ldm_genus_rectal.csv")
+```
+copy for vaginal body site. 
+
+```{r gen ldm cluster vaginal}
+form_cluster_gen_vag <- motu_gen_vag | (timepoint + Plate  + age + income + parity+ TobaccoUse_MR + AlcoholUse_MR + MarijuanaUse_MR ) ~  Preg_Chlam + Preg_UTI + Preg_BV 
+
+res.ldm.cluster.gen.vag <-ldm(formula= form_cluster_gen_vag, 
+          data= med_dat_vag, 
+          cluster.id = "subjectID",
+          seed=11062015,
+          perm.within.type="free", perm.between.type="none") # matched sets for diff between timepoints
+
+res.ldm.cluster.gen.vag$n.perm.completed     # number of permutations 25,000
+res.ldm.cluster.gen.vag$global.tests.stopped # did the global tests neet the stopping criteria? 
+res.ldm.cluster.gen.vag$otu.tests.stopped    # did the otu-specific tests neet the stopping criteria?
+res.ldm.cluster.gen.vag$p.global.omni        # global test p value 
+res.ldm.cluster.gen.vag$detected.otu.omni    # signiticant OTUs detected
+
+### look at significant OTUs
+raw.pvalue.gen.vag=as.data.frame(signif(res.ldm.cluster.gen.vag$p.otu.omni,3))
+raw.pvalue.gen.vag <- cbind(covariate = c("Preg_Chlam", "Preg_UTI", "Preg_BV"), raw.pvalue.gen.vag)
+raw.pvalue.gen.vag <- raw.pvalue.gen.vag %>%
+  pivot_longer(cols = Gardnerella:last_col(),
+               names_to = "genus",
+               values_to = "raw_p_value")
+
+########################
+adj.pvalue.gen.vag=as.data.frame(signif(res.ldm.cluster.gen.vag$q.otu.omni,3))
+adj.pvalue.gen.vag <- cbind(covariate = c("Preg_Chlam", "Preg_UTI", "Preg_BV"), adj.pvalue.gen.vag)
+
+adj.pvalue.gen.vag <- adj.pvalue.gen.vag %>%
+  pivot_longer(cols = Gardnerella:last_col(),
+               names_to = "genus",
+               values_to = "adj_p_value")
+
+## merge
+sig_otu_clust_gen_vag <- full_join(raw.pvalue.gen.vag, adj.pvalue.gen.vag, by = c("genus", "covariate"))
+options(scipen = 50)
+only_sig_otu_gen_vag <- sig_otu_clust_gen_vag %>%
+  filter(adj_p_value < 0.05)
+
+
+tidy_otu_gen_vag <- gendat_otu_vag %>%
+  pivot_longer(cols = Gardnerella:last_col(),
+               names_to = "genus",
+               values_to = "rel_abun") %>%
+  filter(rel_abun > 0) 
+tidy_otu_gen_vag$genus <- as.factor(tidy_otu_gen_vag$genus)
+#write.csv(tidy_otu,"tidy_o-     
+gen_counts_vag <- tidy_otu_gen_vag %>%
+  count(genus)
+gen_counts_vag$number_times_occur <- gen_counts_vag$n
+gen_counts_vag <- gen_counts_vag %>% select(-n)
+## merge 
+only_sig_otu_gen_vag <- left_join(only_sig_otu_gen_vag, gen_counts_vag, by = "genus")
+only_sig_otu_gen_vag
+
+write.csv(only_sig_otu_gen_vag, file = "significant_otus_cluster_ldm_genus_vaginal.csv")
+```
+
+Now do this for the matched LMD
+
+```{r genus matched LDM rectal}
+## matched LDM for variables that change between timepoints (like timepoint)
+form_matched_gen_rectal <- motu_gen_rectal | (Plate + age + income + parity+ TobaccoUse_MR + AlcoholUse_MR + MarijuanaUse_MR + Preg_Chlam + Preg_UTI + Preg_BV) ~ timepoint
+
+res.ldm.matched.gen.rectal <-ldm(formula= form_matched_gen_rectal, 
+          data= med_dat_rectal, 
+          cluster.id = "subjectID",
+          seed=11062015,
+          perm.within.type="free", perm.between.type="none") # matched sets for diff between timepoints
+
+res.ldm.matched.gen.rectal$n.perm.completed     # number of permutations
+res.ldm.matched.gen.rectal$global.tests.stopped # did the global tests neet the stopping criteria? 
+res.ldm.matched.gen.rectal$otu.tests.stopped    # did the otu-specific tests neet the stopping criteria?
+res.ldm.matched.gen.rectal$p.global.omni        # global test p value 
+res.ldm.matched.gen.rectal$detected.otu.omni    # signiticant OTUs detected
+
+
+
+
+### look at significant OTUs
+raw.pvalue.matched.gen=as.data.frame(signif(res.ldm.matched.gen.rectal$p.otu.omni,3))
+raw.pvalue.matched.gen <- cbind(covariate = c("timepoint"), raw.pvalue.matched.gen)
+raw.pvalue.matched.gen <- raw.pvalue.matched.gen %>%
+  pivot_longer(cols = Gardnerella:last_col(),
+               names_to = "genus",
+               values_to = "raw_p_value")
+
+########################
+adj.pvalue.matched.gen=as.data.frame(signif(res.ldm.matched.gen.rectal$q.otu.omni,3))
+adj.pvalue.matched.gen <- cbind(covariate = c("timepoint"), adj.pvalue.matched.gen)
+
+adj.pvalue.matched.gen <- adj.pvalue.matched.gen %>%
+  pivot_longer(cols = Gardnerella:last_col(),
+               names_to = "genus",
+               values_to = "adj_p_value")
+
+## merge
+sig_otu_GEN_MATCHED <- full_join(raw.pvalue.matched.gen, adj.pvalue.matched.gen, by = c("genus", "covariate"))
+options(scipen = 50)
+only_sig_otu_matched_gen <- sig_otu_GEN_MATCHED %>%
+  filter(adj_p_value < 0.05)
+only_sig_otu_matched_gen
+
+
+## merge 
+only_sig_otu_matched_gen <- left_join(only_sig_otu_matched_gen, gen_counts, by = "genus")
+only_sig_otu_matched_gen
+
+adj.pvalue.matched.gen %>% filter(adj_p_value < 0.05)
+```
+And copy the same exact thing for vaginal matched LDM at genus level
+
+```{r genus matched LDM vag}
+## matched LDM for variables that change between timepoints (like timepoint)
+form_matched_gen_vag <- motu_gen_vag | (Plate + age + income + parity+ TobaccoUse_MR + AlcoholUse_MR + MarijuanaUse_MR + Preg_Chlam + Preg_UTI + Preg_BV) ~ timepoint
+
+res.ldm.matched.gen.vag <-ldm(formula= form_matched_gen_vag, 
+          data= med_dat_vag, 
+          cluster.id = "subjectID",
+          seed=11062015,
+          perm.within.type="free", perm.between.type="none") # matched sets for diff between timepoints
+
+res.ldm.matched.gen.vag$n.perm.completed     # number of permutations
+res.ldm.matched.gen.vag$global.tests.stopped # did the global tests neet the stopping criteria? 
+res.ldm.matched.gen.vag$otu.tests.stopped    # did the otu-specific tests neet the stopping criteria?
+res.ldm.matched.gen.vag$p.global.omni        # global test p value 
+res.ldm.matched.gen.vag$detected.otu.omni    # signiticant OTUs detected
+
+
+
+
+### look at significant OTUs
+raw.pvalue.matched.gen.vag=as.data.frame(signif(res.ldm.matched.gen.vag$p.otu.omni,3))
+raw.pvalue.matched.gen.vag <- cbind(covariate = c("timepoint"), raw.pvalue.matched.gen.vag)
+raw.pvalue.matched.gen.vag <- raw.pvalue.matched.gen.vag %>%
+  pivot_longer(cols = Gardnerella:last_col(),
+               names_to = "genus",
+               values_to = "raw_p_value")
+
+########################
+adj.pvalue.matched.gen.vag =as.data.frame(signif(res.ldm.matched.gen.vag$q.otu.omni,3))
+adj.pvalue.matched.gen.vag  <- cbind(covariate = c("timepoint"), adj.pvalue.matched.gen.vag )
+
+adj.pvalue.matched.gen.vag  <- adj.pvalue.matched.gen.vag  %>%
+  pivot_longer(cols = Gardnerella:last_col(),
+               names_to = "genus",
+               values_to = "adj_p_value")
+
+## merge
+sig_otu_GEN_MATCHED_vag <- full_join(raw.pvalue.matched.gen.vag, adj.pvalue.matched.gen.vag , by = c("genus", "covariate"))
+options(scipen = 50)
+only_sig_otu_matched_gen_vag <- sig_otu_GEN_MATCHED_vag %>%
+  filter(adj_p_value < 0.05)
+
+## merge 
+only_sig_otu_matched_gen_vag <- left_join(only_sig_otu_matched_gen_vag, gen_counts, by = "genus")
+only_sig_otu_matched_gen_vag
+
+adj.pvalue.matched.gen.vag  %>% filter(adj_p_value < 0.05)
+```
+
+
+## 16s vs metagenomic comparison
+
+now we need to read in the 16S data and do this 
+
+```{r read in 16s data}
+
+sixteens <- read.csv("../biob_outputs/16S/silva_taxonomy_raw_species.csv")
+rownames(sixteens) <- sixteens$index
+indx <- grepl('.s__', colnames(sixteens))
+spec16 <- sixteens[indx]
+
+spec16$subjectID <- sixteens$Subject_ID
+spec16$sampleID <- sixteens$index
+spec16$pcrplate <- sixteens$pcrplateID
+
+spec16 <- spec16 %>%
+  mutate(bodysite = ifelse(grepl("Rec", sampleID), "rectal", 
+                            ifelse(grepl("Vag", sampleID), "vaginal", "other"))) %>%
+  mutate(timepoint = ifelse(grepl(".1.", sampleID), "1",
+                            ifelse(grepl(".2.", sampleID), "2",
+                                   ifelse(grepl(".V3.", sampleID), "3", "other")))) %>% 
+  relocate(subjectID, sampleID, pcrplate, bodysite, timepoint) 
+
+table(spec16$timepoint)
+table(spec16$bodysite)  # remove controls, which make up all the others
+spec16 <- spec16 %>%
+  filter(!bodysite == "other")
+
+## now filter so that it is only the subect IDs that are in the metagenome data. 
+# make list of metagenome data subject ids
+id_list <- med_dat$subjectid
+spec16 <- subset(spec16,  subjectID %in% id_list)
+```
+
+   
+Now we have a dataframe, `spec16`, that contains the 16S results from the same samples. Let's run the LDM on these results. Consider as well that I ONLY have the rectal samples, not vaginal, here. 
+
+```{r set up for sixteen2 LDM}
+## # Transform data to proportions to match compositional aspect of metagenome data
+#ps.prop <- transform_sample_counts(ps, function(otu) otu/sum(otu))
+motu_16s <- spec16 %>%
+  filter(!grepl('NA', sampleID)) %>%
+  filter(timepoint =="1" | timepoint == "2") %>%
+  select( -pcrplate, -bodysite, -timepoint) 
+
+incl_list <- motu_16s$subjectID
+incl <- as.data.frame(motu_16s$subjectID)
+motu_16s <- motu_16s[order(motu_16s$subjectID),]
+rownames(motu_16s) <- motu_16s$sampleID
+motu_16s <- motu_16s %>% select(-subjectID, -sampleID)
+motu_16s <- round((motu_16s/rowSums(motu_16s))*100, 3)
+motu_16s[is.na(motu_16s)] = 0
+motu_16s <- motu_16s[rowSums(motu_16s[])>0,]
+motu_16s <- motu_16s[as.logical(rowSums(motu_16s != 0)), ]
+incl_list2 <- rownames(motu_16s)
+#motu_16s <- gendat_otu
+#motu_16s <- motu_16s %>% select(-sampleID)
+motu_16s <- data.matrix(motu_16s)
+#motu <- as.integer(motu)
+## now make sure meddate is correct
+med_dat_16_b4 <- med_data %>% filter(bodysite != "vaginal" ) %>% arrange(subjectID)
+#med_data
+min <- sixteens %>%
+  select(index, pcrplateID , Subject_ID, SubjectGroup, PrenatalVisit) %>%
+  arrange(Subject_ID)
+
+med_dat_16  <- merge(min, med_dat_16_b4, by.x = "Subject_ID", by.y = "subjectID", all.x = FALSE, all.y = TRUE)
+incl <- incl %>%
+  separate(col = `motu_16s$subjectID` ,into = c("trash", "subjectID", "timepoint","bodycode"), sep = "[.]")
+med_dat_16 <- med_dat_16  %>%
+  #filter(subjectID.y %in% incl$trash) %>%
+  filter(index %in% incl_list2) 
+
+med_dat_16
+
+#%>%
+#  filter(Sequencing_16S == "1" & Sequencing_WGS == "1")%>%
+#  filter(PrenatalVisit != 3) 
+#med_dat_16 # subjectIid
+med_dat_16 <- med_dat_16[!duplicated(med_dat_16[,c('index')]),] #'Subject_ID', 'sample'
+motu_16s_subset <- motu_16s[rownames(motu_16s) %in% med_dat_16$index, ] 
+
+str(motu_16s) # 440
+str(med_dat_16) # 432
+```
+
+Now the cluster LDM to test the effect of timepoint on the mb
+
+
+```{r sixteensldm cluster}
+form_cluster_16s <- motu_16s_subset| (PrenatalVisit + pcrplateID  + age + income + parity+ TobaccoUse_MR + AlcoholUse_MR + MarijuanaUse_MR ) ~ Preg_Chlam + Preg_UTI + Preg_BV 
+
+res.ldm.cluster.16s <-ldm(formula= form_cluster_16s, 
+          data= med_dat_16, 
+          cluster.id = "Subject_ID",
+          seed=11062015,
+          perm.within.type="free", perm.between.type="none") # matched sets for diff between timepoints
+
+res.ldm.cluster.16s$n.perm.completed     # number of permutations 32,000
+res.ldm.cluster.16s$global.tests.stopped # did the global tests neet the stopping criteria? 
+res.ldm.cluster.16s$otu.tests.stopped    # did the otu-specific tests neet the stopping criteria?
+res.ldm.cluster.16s$p.global.omni        # global test p value  # [1] 0.216 0.463 0.774 0.641 0.966
+res.ldm.cluster.16s$detected.otu.omni    # signiticant OTUs detected
+
+### look at significant OTUs
+raw.pvalue.16s=as.data.frame(signif(res.ldm.cluster.16s$p.otu.omni,3))
+raw.pvalue.16s <- cbind(covariate = c( "Preg_Chlam", "Preg_UTI", "Preg_BV"), raw.pvalue.16s)
+#raw.pvalue.16s
+raw.pvalue.16s <- raw.pvalue.16s %>%
+  pivot_longer(cols = d__Bacteria.p__Actinobacteriota.c__Actinobacteria.o__Actinomycetales.f__Actinomycetaceae.g__Actinomyces.s__Actinomyces_dentalis:last_col(),
+               names_to = "species",
+               values_to = "raw_p_value")
+
+########################
+adj.pvalue.16s=as.data.frame(signif(res.ldm.cluster.16s$q.otu.omni,3))
+adj.pvalue.16s <- cbind(covariate = c("Preg_Chlam", "Preg_UTI", "Preg_BV"), adj.pvalue.16s)
+adj.pvalue.16s
+adj.pvalue.16s <- adj.pvalue.16s %>%
+  pivot_longer(cols = d__Bacteria.p__Actinobacteriota.c__Actinobacteria.o__Actinomycetales.f__Actinomycetaceae.g__Actinomyces.s__Actinomyces_dentalis:last_col(),
+               names_to = "species",
+               values_to = "adj_p_value")
+
+## merge
+sig_otu_clust_16s <- full_join(raw.pvalue.16s, adj.pvalue.16s, by = c("species", "covariate"))
+options(scipen = 50)
+only_sig_otu_16s <- sig_otu_clust_16s %>%
+  filter(adj_p_value < 0.05)
+
+#################################
+tidy_otu_16s <- spec16 %>%
+  pivot_longer(cols = starts_with("d__"),
+               names_to = "species",
+               values_to = "rel_abun") %>%
+  filter(rel_abun > 0) 
+tidy_otu_16s$species <- as.factor(tidy_otu_16s$species)
+#write.csv(tidy_otu,"tidy_o-     
+sxtns_counts <- tidy_otu_16s %>%
+  count(species)
+sxtns_counts$number_times_occur <- sxtns_counts$n
+sxtns_counts <- sxtns_counts %>% select(-n)
+## merge 
+only_sig_otu_16s <- left_join(only_sig_otu_16s, sxtns_counts, by = "species")
+only_sig_otu_16s
+
+write.csv(only_sig_otu_16s, file = "significant_otus_cluster_ldm_16s_rectal.csv")
+```
+
+Now do the matched LDM. 
+
+```{r sixteens matched LDM}
+## matched LDM for variables that change between timepoints (like timepoint)
+form_matched_16s <- motu_16s_subset | ( pcrplateID  + age + income + parity+ TobaccoUse_MR + AlcoholUse_MR + MarijuanaUse_MR + Preg_Chlam + Preg_UTI + Preg_BV) ~ PrenatalVisit 
+
+res.ldm.matched.16s.rectal <-ldm(formula= form_matched_16s, 
+           data= med_dat_16, 
+          cluster.id = "Subject_ID",
+          seed=11062015,
+          perm.within.type="free", perm.between.type="none") # matched sets for diff between timepoints
+
+res.ldm.matched.16s.rectal$n.perm.completed     # number of permutations
+res.ldm.matched.16s.rectal$global.tests.stopped # did the global tests neet the stopping criteria? 
+res.ldm.matched.16s.rectal$otu.tests.stopped    # did the otu-specific tests neet the stopping criteria?
+res.ldm.matched.16s.rectal$p.global.omni        # global test p value 
+res.ldm.matched.16s.rectal$detected.otu.omni    # signiticant OTUs detected
+
+
+
+
+### look at significant OTUs
+raw.pvalue.matched.16s.rectal=as.data.frame(signif(res.ldm.matched.16s.rectal$p.otu.omni,3))
+raw.pvalue.matched.16s.rectal <- cbind(covariate = c("timepoint"), raw.pvalue.matched.16s.rectal)
+raw.pvalue.matched.16s.rectal <- raw.pvalue.matched.16s.rectal %>%
+  pivot_longer(cols = starts_with("d__"),
+               names_to = "species",
+               values_to = "raw_p_value")
+
+########################
+adj.pvalue.matched.16s.rectal=as.data.frame(signif(res.ldm.matched.16s.rectal$q.otu.omni,3))
+adj.pvalue.matched.16s.rectal <- cbind(covariate = c("timepoint"), adj.pvalue.matched.16s.rectal)
+
+adj.pvalue.matched.16s.rectal <- adj.pvalue.matched.16s.rectal %>%
+  pivot_longer(cols = starts_with("d__"),
+               names_to = "species",
+               values_to = "adj_p_value")
+
+## merge
+sig_otu_16s_matched_rectal<- full_join(raw.pvalue.matched.16s.rectal, adj.pvalue.matched.16s.rectal, by = c("species"))
+options(scipen = 50)
+only_sig_otu_matched_16s_rectal <- sig_otu_16s_matched_rectal%>%
+  filter(adj_p_value < 0.05)
+only_sig_otu_matched_16s_rectal
+
+
+## merge 
+only_sig_otu_matched_16s_rectal <- left_join(only_sig_otu_matched_16s_rectal, gen_counts, by = "species")
+only_sig_otu_matched_16s_rectal
+
+adj.pvalue.matched.16s.rectal %>% filter(adj_p_value < 0.05)
+
+#write.csv(only_sig_otu_16s, file = "significant_otus_cluster_ldm_16s_rectal.csv")
+```
+
+
+
+and now we repeat for the 16S vaignal samples/ first we read in the dats
+```{r read in vafg 16s}
+library("haven")   
+vag16 <- read_sav("~/tiramisu/OneDrive/proj_angst/aim_one/MSL_emory_all_runs_dad2_abundance_table_PECAN_taxa-merged_StR_CST(3).sav")
+head(vag16)
+vag16 <- vag16[!grepl("^g_", colnames(vag16))]
+vag16 <- vag16[!grepl("^f_", colnames(vag16))]
+vag16 <- vag16[!grepl("^o_", colnames(vag16))]
+vag16 <- vag16[!grepl("^c_", colnames(vag16))]
+
+vag16_long <- vag16 %>%
+  mutate(bodysite = ifelse(grepl("Rec", sampleID), "rectal", 
+                            ifelse(grepl("Vag", sampleID), "vaginal", "other"))) %>%
+  filter(bodysite == "vaginal") %>%
+  mutate(timepoint = ifelse(grepl(".1.", sampleID), "1",
+                            ifelse(grepl(".2.", sampleID), "2",
+                                   ifelse(grepl(".V3.", sampleID), "3", "other")))) %>%
+  relocate(sampleID, bodysite, timepoint) %>%
+  separate(col = sampleID, into = c("plate", "subjectID", "timepoint2", "bodysite2"), remove = FALSE)%>%
+  pivot_longer(cols = Lactobacillus_iners:Methylobacterium_goesingense,
+               names_to = "species", values_to = "spec_counts") %>%
+  mutate(rel_abun = round( spec_counts / read_count, 6) ) %>%
+  filter(rel_abun >= 0.01) 
+## need to filter the 16s data by the subject IDs that are in the metagenome data
+
+vag16_long <- subset(vag16_long,  subjectID %in% id_list)
+vag_16sub <- unique(vag16_long$subjectID)
+vag16s_samps <- vag16_long %>% select(subjectID, timepoint, sampleID, plate) %>% distinct()
+head(vag16_long)
+
+motu16s_vag_df <- vag16_long %>% select(sampleID, species, rel_abun) %>%
+  arrange(sampleID) %>%
+  pivot_wider(id_cols = sampleID, 
+              names_from = species, 
+              values_from = rel_abun,
+              values_fill = 0) 
+##############################################
+## clean up the 16s data so it is ready for LDM
+incl_list_vag <- motu16s_vag_df$sampleID
+motu16s_vag <- motu16s_vag_df %>% select( - sampleID)
+rownames(motu16s_vag) <- motu16s_vag_df$sampleID
+motu16s_vag <-motu16s_vag[rowSums(motu16s_vag[])>0,]
+motu16s_vag <- data.matrix(motu16s_vag) 
+str(motu16s_vag) ### 440
+#########################
+## get meta data subset from 16s for LDM
+med_dat_16s_vag <- med_dat_vag %>% filter(subjectID %in% vag_16sub) %>%
+  filter(Sequencing_16S == "1" & Sequencing_WGS == "1")
+  
+vag16_meta_dat <- left_join(vag16s_samps, med_dat_16s_vag, by=c("subjectID","timepoint"), copy = FALSE)
+
+## remove dups
+vag16_meta_dat <-  as.data.frame( vag16_meta_dat[!duplicated( vag16_meta_dat[1:3]),] )
+head(vag16_meta_dat)
+```
+
+
+
+
+
+
+LDM
+
+```{r sixteensldm cluster}
+form_cluster_16s_vag <- motu16s_vag| (timepoint + plate  + age + income + parity+ TobaccoUse_MR + AlcoholUse_MR + MarijuanaUse_MR ) ~ Preg_Chlam + Preg_UTI + Preg_BV 
+
+res.ldm.cluster.16s.vag <-ldm(formula= form_cluster_16s_vag, 
+          data= vag16_meta_dat, 
+          cluster.id = "subjectID",
+          seed=11062015,
+          perm.within.type="free", perm.between.type="none") # matched sets for diff between timepoints
+
+res.ldm.cluster.16s.vag$n.perm.completed     # number of permutations 32,000
+res.ldm.cluster.16s.vag$global.tests.stopped # did the global tests neet the stopping criteria? 
+res.ldm.cluster.16s.vag$otu.tests.stopped    # did the otu-specific tests neet the stopping criteria?
+res.ldm.cluster.16s.vag$p.global.omni        # global test p value  # [1] 0.216 0.463 0.774 0.641 0.966
+res.ldm.cluster.16s.vag$detected.otu.omni    # signiticant OTUs detected
+
+### look at significant OTUs
+raw.pvalue.16s.vag=as.data.frame(signif(res.ldm.cluster.16s.vag$p.otu.omni,3))
+raw.pvalue.16s.vag <- cbind(covariate = c( "Preg_Chlam", "Preg_UTI", "Preg_BV"), raw.pvalue.16s.vag)
+#raw.pvalue.16s
+raw.pvalue.16s.vag <- raw.pvalue.16s.vag %>%
+  pivot_longer(cols = Lactobacillus_iners:last_col(),
+               names_to = "species",
+               values_to = "raw_p_value")
+
+########################
+adj.pvalue.16s.vag=as.data.frame(signif(res.ldm.cluster.16s.vag$q.otu.omni,3))
+adj.pvalue.16s.vag <- cbind(covariate = c("Preg_Chlam", "Preg_UTI", "Preg_BV"), adj.pvalue.16s.vag)
+adj.pvalue.16s.vag
+adj.pvalue.16s.vag <- adj.pvalue.16s.vag %>%
+  pivot_longer(cols =Lactobacillus_iners:last_col(),
+               names_to = "species",
+               values_to = "adj_p_value")
+
+## merge
+sig_otu_clust_16s.vag <- full_join(raw.pvalue.16s.vag, adj.pvalue.16s.vag, by = c("species", "covariate"))
+options(scipen = 50)
+only_sig_otu_16s_vag <- sig_otu_clust_16s.vag %>%
+  filter(adj_p_value < 0.05)
+
+#################################
+tidy_otu_16s_vag <- vag16 %>%
+  pivot_longer(cols = Lactobacillus_iners:Methylobacterium_goesingense,
+               names_to = "species",
+               values_to = "spec_counts") %>%
+   mutate(rel_abun = round( spec_counts / read_count, 6) ) %>%
+  filter(rel_abun > 0.01) 
+tidy_otu_16s_vag$species <- as.factor(tidy_otu_16s_vag$species)
+#write.csv(tidy_otu,"tidy_o-     
+sxtns_counts <- tidy_otu_16s_vag %>%
+  count(species)
+sxtns_counts$number_times_occur <- sxtns_counts$n
+sxtns_counts <- sxtns_counts %>% select(-n)
+## merge 
+only_sig_otu_16s_vag <- left_join(only_sig_otu_16s_vag, sxtns_counts, by = "species")
+only_sig_otu_16s_vag
+
+write.csv(only_sig_otu_16s_vag, file = "significant_otus_cluster_ldm_16s_vag.csv")
+only_sig_otu_16s_vag
+
+res.ldm.cluster.16s.vag$
+```
+
+Now do the matched LDM. 
+
+```{r sixteens matched LDM}
+## matched LDM for variables that change between timepoints (like timepoint)
+form_matched_16s_vag <- motu16s_vag | ( plate  + age + income + parity+ TobaccoUse_MR + AlcoholUse_MR + MarijuanaUse_MR + Preg_Chlam + Preg_UTI + Preg_BV) ~ timepoint
+
+res.ldm.matched.16s.vag <-ldm(formula= form_matched_16s_vag, 
+          data= vag16_meta_dat, 
+          cluster.id = "subjectID",
+          seed=11062015,
+          perm.within.type="free", perm.between.type="none") # matched sets for diff between timepoints
+
+res.ldm.matched.16s.vag$n.perm.completed     # number of permutations
+res.ldm.matched.16s.vag$global.tests.stopped # did the global tests neet the stopping criteria? 
+res.ldm.matched.16s.vag$otu.tests.stopped    # did the otu-specific tests neet the stopping criteria?
+res.ldm.matched.16s.vag$p.global.omni        # global test p value 
+res.ldm.matched.16s.vag$detected.otu.omni    # signiticant OTUs detected
+
+
+
+
+### look at significant OTUs
+raw.pvalue.matched.16s.vag = as.data.frame(signif(res.ldm.matched.16s.vag$p.otu.omni,3))
+raw.pvalue.matched.16s.vag<- cbind(covariate = c("timepoint"), raw.pvalue.matched.16s.vag
+raw.pvalue.matched.16s.vag<- raw.pvalue.matched.16s.vag%>%
+  pivot_longer(cols = Lactobacillus_iners:Lactobacillus_salivarius,
+               names_to = "species",
+               values_to = "raw_p_value")
+
+########################
+adj.pvalue.matched.16s.vag=as.data.frame(signif(res.ldm.matched.16s.vag$q.otu.omni,3))
+adj.pvalue.matched.16s.vag <- cbind(covariate = c("timepoint"), adj.pvalue.matched.16s.vag)
+
+adj.pvalue.matched.16s.vag <- adj.pvalue.matched.16s.vag %>%
+   pivot_longer(cols = Lactobacillus_iners:Lactobacillus_salivarius,
+               names_to = "species",
+               values_to = "adj_p_value")
+
+#################################
+tidy_otu_16s_vag <- vag16 %>%
+  pivot_longer(cols = Lactobacillus_iners:Lactobacillus_salivarius,
+               names_to = "species",
+               values_to = "spec_counts") %>%
+   mutate(rel_abun = round( spec_counts / read_count, 6) ) %>%
+  filter(rel_abun > 0.01) 
+tidy_otu_16s_vag$species <- as.factor(tidy_otu_16s_vag$species)
+#write.csv(tidy_otu,"tidy_o-     
+sxtns_counts <- tidy_otu_16s_vag %>%
+  count(species)
+sxtns_counts$number_times_occur <- sxtns_counts$n
+sxtns_counts <- sxtns_counts %>% select(-n)
+## merge 
+
+## merge
+sig_otu_16s_matched_vag<- full_join(raw.pvalue.matched.16s.vag, adj.pvalue.matched.16s.vag, by = c("species"))
+options(scipen = 50)
+only_sig_otu_matched_16s_vag <- sig_otu_16s_matched_vag%>%
+  filter(adj_p_value < 0.05)
+only_sig_otu_matched_16s_vag
+
+
+adj.pvalue.matched.16s.vag %>% filter(adj_p_value < 0.05)
+
+#write.csv(only_sig_otu_16s, file = "significant_otus_cluster_ldm_16s_vag.csv")
+```

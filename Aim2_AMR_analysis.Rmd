@@ -1,0 +1,457 @@
+---
+title: "Aim2_AMR_Analysis"
+author: "Emily Wissel"
+date: "1/31/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(gee) # for significance test at the end
+```
+
+## Catalogue of AMR Genes Detected during Pregnancy 
+
+Read in the meta data
+```{r meta data}
+#read in medical data
+med_dat <- read_csv("../medical_data/MPTB_Sociodemographic Outcome Health Behaviors update4, 16S, WGS indicator.csv")
+med_dat <- med_dat %>% filter(Sequencing_WGS == "1"  )
+
+# cofounder variables: age, income, parity, TobaccoUse_MRm AlcoholUse_MR, MarijuanaUse_MR, 
+# covariate variables: birthoutcome, labor, Preg_Chlam, Preg_UTI
+
+# merge med_dat and small
+med_dat$subjectID <- med_dat$subjectid
+small <- dat_otu %>% select(sample, subjectID, Plate, timepoint, bodysite) # from aim 1 r script
+small <- small [order(small$sample),]
+med_data <- merge(small, med_dat, all = TRUE, by.x = "subjectID", by.y = "subjectid" )
+#med_data # 937 rows
+med_data[order(med_data$sample),] ## motu and med_dat should have same order of samples in rows
+#write.csv(med_dat, "med_data_for_mj.csv")
+
+med_data$sample<-gsub("_profile","",as.character(med_data$sample))
+
+med_dat_vag <- med_data %>% filter(bodysite == "vaginal")
+med_dat_rectal <- med_data %>% filter(bodysite == "vaginal")
+
+table(med_data$Preg_BV)
+table(med_data$Preg_UTI)
+table(med_data$Preg_Chlam)
+#med_dat_vag #%>% unique(subjectID)
+
+length(unique(med_dat$subjectID) )
+
+head(med_dat_vag)
+```
+
+
+
+Firest we read in the data
+```{r read in data}
+dat <- read_csv("compiled_amrfinderplus_output.csv",  col_names = FALSE)
+colnames(dat) <- c("sample", "gene_length", "gene_name", "drug_class")
+dat$gene_name_lower <- tolower(dat$gene_name)
+
+# replace weird na with proper na
+#dat[is.na(dat)] <- "NA"
+length(unique(dat$sample) ) # 814 
+table(dat$drug_class)
+
+
+df <- left_join(dat, med_data)
+## remove pp samples 
+df <- df %>%filter(timepoint != "NA")
+
+## inspect AMR genes in control samples
+#df %>% filter(bodysite == "control")
+
+# get median amr genes per sample per bodysite
+df %>%
+  filter(bodysite != "control") %>%
+  group_by(subjectID, bodysite) %>%
+  count(drug_class) %>%
+  ungroup %>%
+  group_by(bodysite) %>%
+  summarize(Mean=mean(n), Max=max(n), Min=min(n), Median=median(n), Std=sd(n))
+
+vag_df <- dat %>% 
+  mutate(bodysite = ifelse(str_detect(sample, 'Vag'), "vaginal", 
+                           ifelse(str_detect(sample, "Rec"), "rectal", 
+                                  "control"))) %>%
+  mutate(timepoint = ifelse(str_detect(sample, "-1-"), "1",
+                            ifelse(str_detect(sample, "-2-"), "2", "other"))) %>%
+  filter(bodysite == "vaginal") %>% 
+  group_by(drug_class) %>%
+  filter(n()>10) %>% # filter out drug classes observed in fewer than 10 samples
+  ungroup()
+vag_df # 1,831 rows
+vag_df <- left_join(vag_df, med_data)
+
+vag_df %>%
+  filter(bodysite != "control") %>%
+  group_by(subjectID, bodysite) %>%
+  count(drug_class) %>%
+  ungroup %>%
+  group_by(bodysite) %>%
+  summarize(Mean=mean(n), Max=max(n), Min=min(n), Median=median(n), Std=sd(n))
+
+
+```
+
+nOW MAKE A VISUAL
+```{r}
+tidydat <- df %>%
+ mutate(infxn_id = ifelse(Preg_Chlam == "1" | Preg_BV == "1" | Preg_UTI == "1", "vag_infxn",
+                           ifelse(Antibiotic_oral == "1" | OralAbxBetween1.2 == "1" | ParenAbxBetween1.2 == "1" |
+                                    Antibiotic_parenteral == "1" | Antibiotic_vaginal == "1" | Antifungal_oral == "1" |
+                                    Antifungal_vaginal == "1", 
+                                  "other_abx_infxn", "no_infxn") ))  %>%
+  group_by(subjectID, bodysite, infxn_id, timepoint) %>%
+  count(drug_class)
+
+check <- med_data %>%
+  mutate(infxn_id = ifelse(Preg_Chlam == "1" | Preg_BV == "1" | Preg_UTI == "1", "vag_infxn",
+                           ifelse(Antibiotic_oral == "1" | OralAbxBetween1.2 == "1" | ParenAbxBetween1.2 == "1" |
+                                    Antibiotic_parenteral == "1" | Antibiotic_vaginal == "1" | Antifungal_oral == "1" |
+                                    Antifungal_vaginal == "1", 
+                                  "other_abx_infxn", "no_infxn") )) 
+
+check %>%
+  select(sample, subjectID, infxn_id, Preg_Chlam, Preg_UTI, Preg_BV, Antibiotic_oral, OralAbxBetween1.2, ParenAbxBetween1.2, Antibiotic_parenteral, Antibiotic_vaginal, Antifungal_oral, Antifungal_vaginal) %>%
+  filter(infxn_id == "NA")
+## this is working the way it is suppose to, yay! 
+
+
+
+tidydat %>%
+  ggplot(aes(x = drug_class, y = n, fill = infxn_id, color = infxn_id) ) + 
+  geom_boxplot() + 
+  geom_jitter(height = 0.1) +
+  facet_wrap(.~timepoint) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1)) 
+  
+tidydat %>%
+  filter(infxn_id != "NA") %>%
+  ggplot(aes(x = drug_class, y = n,  color = infxn_id) ) + 
+  geom_boxplot() + 
+  geom_jitter(height = 0.1, width = 0.2) +
+  facet_wrap(.~infxn_id, ncol = 1) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  scale_color_manual(values = c( "lavenderblush3", "thistle", "lightsteelblue2")) +
+  theme_light() +
+  labs(title = " AMR genes detected per sample across drug classes")
+```
+
+
+now we set it up for a chi squared test. we should use the Fisher’s exact test instead of the Chi-square test because there is at least one cell below 5.
+
+```{r chi squared}
+predat <- tidydat %>%
+  ungroup() %>%
+  filter(infxn_id != "NA") %>%
+  group_by(bodysite, infxn_id, drug_class, timepoint) %>%
+  summarize(amr_count = sum(n))
+  
+rectal_agg_dat <-predat %>%
+  #pivot_wider(names_from = "drug_class", values_from = 'amr_count', values_fill = 0) %>%
+  filter(bodysite == "vaginal")%>%
+  ungroup () %>%
+  select(-bodysite)
+# make a matrix
+#rownames(rectal_agg_dat) <- rectal_agg_dat$infxn_id
+rec_agg_mat <- as.matrix(rectal_agg_dat)
+#rectal_agg_dat
+
+vag_agg_dat <- predat %>%
+  #pivot_wider(names_from = "drug_class", values_from = 'amr_count', values_fill = 0) %>%
+  filter(bodysite == "vaginal")%>%
+  ungroup () %>%
+  select(-bodysite)
+
+#View(rectal_agg_dat)
+
+## make figure to show contingency table
+
+
+rectal_agg_dat %>%
+ ggplot(aes(x = drug_class, y = infxn_id)) +
+  geom_point(aes(size = amr_count), shape = 21, colour = "black", fill = "cornsilk") +
+  scale_size_area(max_size = 20, guide = FALSE) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1)) +
+  geom_text(aes(
+    y = infxn_id, label = amr_count),
+    vjust = 3.5,
+    colour = "grey60",
+    size = 4) +
+  labs(title = "Rectal AMR Genes")
+vag_agg_dat %>%
+ ggplot(aes(x = drug_class, y = infxn_id)) +
+  geom_point(aes(size = amr_count), shape = 21, colour = "black", fill = "cornsilk") +
+  scale_size_area(max_size = 20, guide = FALSE) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1)) +
+  geom_text(aes(
+    y = infxn_id, label = amr_count),
+    vjust = 3.5,
+    colour = "grey60",
+    size = 4) +
+  labs(title = "Vaginal AMR Genes")
+
+#compile
+predat %>%
+ ggplot(aes(x = drug_class, y = infxn_id, fill = infxn_id)) +
+  geom_point(aes(size = amr_count), shape = 21, colour = "black") +
+  scale_size_area(max_size = 20, guide = FALSE) +
+  theme_light() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=1)) +
+  geom_text(aes( y = infxn_id, label = amr_count),
+    vjust = 3.5, colour = "grey60",size = 4) +
+  labs(title = "AMR Genes") +
+  facet_wrap(.~bodysite, ncol = 1) +
+  scale_fill_manual(values = c( "lavender", "thistle", "lightsteelblue2"))
+
+predat
+```
+
+lets do a chi squared for each bodysite at each timepoint. The chi-squared test helps to determine whether there is a notable difference between the normal frequencies and the observed frequencies in one or more classes or categories. It gives the probability of independent variables.
+
+```{r chiu squared rectal}
+rec_df <- dat %>% 
+  mutate(bodysite = ifelse(str_detect(sample, 'Vag'), "vaginal", 
+                           ifelse(str_detect(sample, "Rec"), "rectal", 
+                                  "control"))) %>%
+  mutate(timepoint = ifelse(str_detect(sample, "-1-"), "1",
+                            ifelse(str_detect(sample, "-2-"), "2", "other"))) %>%
+  filter(bodysite == "rectal") %>% 
+  group_by(drug_class) %>%
+  filter(n()>10) %>% # filter out drug classes observed in fewer than 10 samples
+  ungroup()
+rec_df # 9,417 rows
+rec_df <- left_join(rec_df, med_data)
+
+rectal_agg_dat_t1 <- rec_df %>%
+ mutate(infxn_id = ifelse(Preg_Chlam == "1" | Preg_BV == "1" | Preg_UTI == "1", "vag_infxn",
+                           ifelse(Antibiotic_oral == "1" | OralAbxBetween1.2 == "1" | ParenAbxBetween1.2 == "1" |
+                                    Antibiotic_parenteral == "1" | Antibiotic_vaginal == "1" | Antifungal_oral == "1" |
+                                    Antifungal_vaginal == "1", 
+                                  "other_abx_infxn", "no_infxn") ))  %>%
+  ungroup() %>%
+  filter(infxn_id != "NA") %>%
+  group_by(bodysite, infxn_id, drug_class, timepoint) %>%
+  filter(bodysite == "rectal") %>% 
+  filter(timepoint == "1") %>%
+  ungroup() %>% group_by(drug_class) %>%
+  filter(n()>10) %>% # filter out drug classes observed in fewer than 10 samples
+  ungroup()
+
+
+rectal_agg_dat_t2 <- rec_df %>%
+ mutate(infxn_id = ifelse(Preg_Chlam == "1" | Preg_BV == "1" | Preg_UTI == "1", "vag_infxn",
+                           ifelse(Antibiotic_oral == "1" | OralAbxBetween1.2 == "1" | ParenAbxBetween1.2 == "1" |
+                                    Antibiotic_parenteral == "1" | Antibiotic_vaginal == "1" | Antifungal_oral == "1" |
+                                    Antifungal_vaginal == "1", 
+                                  "other_abx_infxn", "no_infxn") ))  %>%
+  ungroup() %>%
+  filter(infxn_id != "NA") %>%
+  group_by(bodysite, infxn_id, drug_class, timepoint) %>%
+  filter(bodysite == "rectal") %>% 
+  filter(timepoint == "2") %>%
+  ungroup()%>% group_by(drug_class) %>%
+  filter(n()>10) %>% # filter out drug classes observed in fewer than 10 samples
+  ungroup()
+
+
+
+############ run those tests bb
+t1_rec <- chisq.test(table(rectal_agg_dat_t1$infxn_id, rectal_agg_dat_t1$drug_class))
+t1_rec$observed # BETA-LACTAM MACROLIDE TETRACYCLINE VIRULENCE
+t1_rec$p.value
+t1_rec$residuals
+t1_rec$stdres
+
+t2_rec <- chisq.test(table(rectal_agg_dat_t2$infxn_id, rectal_agg_dat_t2$drug_class))
+t2_rec$observed # BETA-LACTAM MACROLIDE TETRACYCLINE VIRULENCE
+t2_rec$p.value # no sig difference 
+t2_rec$stdres
+
+intm <-df %>% mutate(infxn_id = ifelse(Preg_Chlam == "1" | Preg_BV == "1" | Preg_UTI == "1", "vag_infxn",
+                           ifelse(Antibiotic_oral == "1" | OralAbxBetween1.2 == "1" | ParenAbxBetween1.2 == "1" |
+                                    Antibiotic_parenteral == "1" | Antibiotic_vaginal == "1" | Antifungal_oral == "1" |
+                                    Antifungal_vaginal == "1", 
+                                  "other_abx_infxn", "no_infxn") ))  %>%
+  select(subjectID, infxn_id) %>%
+  distinct()
+
+table(intm$infxn_id)
+#unique(rectal_agg_dat_t2$drug_class)
+
+
+```
+interp guide: https://scholarworks.umass.edu/cgi/viewcontent.cgi?article=1269&context=pare
+look at standardized residuals greater than |2|. 
+
+now the same for vaginal data
+```{r chi squared vag}
+vag_agg_dat_t1 <- vag_df %>%
+ mutate(infxn_id = ifelse(Preg_Chlam == "1" | Preg_BV == "1" | Preg_UTI == "1", "vag_infxn",
+                           ifelse(Antibiotic_oral == "1" | OralAbxBetween1.2 == "1" | ParenAbxBetween1.2 == "1" |
+                                    Antibiotic_parenteral == "1" | Antibiotic_vaginal == "1" | Antifungal_oral == "1" |
+                                    Antifungal_vaginal == "1", 
+                                  "other_abx_infxn", "no_infxn") ))  %>%
+  ungroup() %>%
+  filter(infxn_id != "NA") %>%
+  group_by(bodysite, infxn_id, drug_class, timepoint) %>%
+  filter(bodysite == "vaginal") %>% 
+  filter(timepoint == "1") %>%
+  ungroup() %>% group_by(drug_class) %>%
+  filter(n()>10) %>% # filter out drug classes observed in fewer than 10 samples
+  ungroup()
+
+
+vag_agg_dat_t2 <- vag_df%>%
+ mutate(infxn_id = ifelse(Preg_Chlam == "1" | Preg_BV == "1" | Preg_UTI == "1", "vag_infxn",
+                           ifelse(Antibiotic_oral == "1" | OralAbxBetween1.2 == "1" | ParenAbxBetween1.2 == "1" |
+                                    Antibiotic_parenteral == "1" | Antibiotic_vaginal == "1" | Antifungal_oral == "1" |
+                                    Antifungal_vaginal == "1", 
+                                  "other_abx_infxn", "no_infxn") ))  %>%
+  ungroup() %>%
+  filter(infxn_id != "NA") %>%
+  group_by(bodysite, infxn_id, drug_class, timepoint) %>%
+  filter(bodysite == "vaginal") %>% 
+  filter(timepoint == "2") %>%
+  ungroup()%>% group_by(drug_class) %>%
+  filter(n()>10) %>% # filter out drug classes observed in fewer than 10 samples
+  ungroup()  
+
+
+
+############ run those tests bb
+t1_vag <- chisq.test(table(vag_agg_dat_t1$infxn_id, vag_agg_dat_t1$drug_class))
+t1_vag$observed # BETA-LACTAM MACROLIDE TETRACYCLINE VIRULENCE
+t1_vag$p.value # no sig difference
+t1_vag
+
+t2_vag <- chisq.test(table(vag_agg_dat_t2$infxn_id, vag_agg_dat_t2$drug_class))
+t2_vag$observed # BETA-LACTAM MACROLIDE TETRACYCLINE VIRULENCE
+t2_vag$p.value #  sig difference 
+t2_vag$stdres
+t2_vag$residuals
+
+
+```
+
+### Generalized Estimating Equiation (GEE)
+
+(source)[https://data.library.virginia.edu/getting-started-with-generalized-estimating-equations/]
+
+This is a good nonparametric approach for "simple"(er) modelling with longitudinal and/or clustered data. Dr. Melinda Higgins recommended I take this approach when I asked about longitudinal data and chi squared tests.
+
+
+```{r gee}
+gee_dat <- tidydat %>%
+  ungroup() %>%
+  filter(infxn_id != "NA") %>%
+  #select(sample, subjectID, bodysite, timepoint, infxn_id, drug_class) %>%
+  na.omit() %>% group_by(drug_class) %>%
+  filter(n()>10) %>% # filter out drug classes observed in fewer than 10 samples
+  ungroup()
+
+gee_dat$drug_class <- as.factor(gee_dat$drug_class)
+gee_dat$infxn_id <- as.factor(gee_dat$infxn_id)
+gee_dat$timepoint <- as.factor(gee_dat$timepoint)
+gee_dat$subjectID <- as.factor(gee_dat$subjectID)
+#######
+gee_rec <- gee_dat %>% filter(bodysite == "rectal") %>% arrange(subjectID) ## gee assumes clustered data is in continous rows
+gee_vag = gee_dat %>%filter(bodysite == "vaginal")%>% arrange(subjectID)
+########### set up complete
+gtest_rec <- df %>%
+ mutate(infxn_id = ifelse(Preg_Chlam == "1" | Preg_BV == "1" | Preg_UTI == "1", "vag_infxn",
+                           ifelse(Antibiotic_oral == "1" | OralAbxBetween1.2 == "1" | ParenAbxBetween1.2 == "1" |
+                                    Antibiotic_parenteral == "1" | Antibiotic_vaginal == "1" | Antifungal_oral == "1" |
+                                    Antifungal_vaginal == "1", 
+                                  "other_abx_infxn", "no_infxn") ))  %>%
+  group_by(subjectID, bodysite, infxn_id, timepoint) %>%
+  filter(infxn_id != "NA") %>%
+  select(sample, subjectID, bodysite, timepoint, infxn_id, drug_class) %>%
+  na.omit() %>%
+  filter(bodysite=="rectal") %>%
+  ungroup()
+table(gtest_rec$drug_class, gtest_rec$infxn_id)
+
+###############
+form = n ~ drug_class + infxn_id + timepoint
+
+gout_rec <- gee(formula = form,
+    id = subjectID,
+    data = gee_rec,
+    family = "poisson"
+    )
+
+#predat ## all samples pooled
+summary(gout_rec)
+gout_rec
+```
+
+heko wiht interp? https://stats.stackexchange.com/questions/215980/how-to-interpret-geeglm-results 
+
+let's just replicate in the vaginal data and figure out what it means later because i am severely sleep deprived 
+
+```{r all bodysites gee}
+## filter so that only drug classes with at least 10 observed AMR genes across the whole dataset are included 
+
+###############
+form_whole = n ~ drug_class + infxn_id + timepoint + bodysite
+
+gout_whole <- gee(formula = form_whole,
+    id = subjectID,
+    data = gee_dat,
+    family = "poisson"
+    )
+
+#predat ## all samples pooled
+summary(gout_whole)
+gout_whole
+###### get p values
+#coef(summary(gout_whole))
+2 * pnorm(abs(coef(summary(gout_whole))[,5]), lower.tail = FALSE)
+```
+
+## compare diversity across infxn_id groups
+
+```{r alpha diversity}
+head(data_alphadiv)
+
+
+wide_dat <- tidydat %>%
+  pivot_wider(names_from = drug_class, values_from = n,  values_fill = 0)
+wide_dat ## 727
+alph_dat <- left_join(wide_dat, data_alphadiv)
+alph_dat <- alph_dat %>%
+  filter(timepoint != "control" ) %>%
+  filter(infxn_id != "NA")
+alph_dat$timepoint <- as.numeric(alph_dat$timepoint)
+
+alph_dat %>%
+  ggplot(aes(x = timepoint, y = data_shannon, fill = infxn_id)) +
+  geom_boxplot(outlier.shape = NA) + 
+  geom_point(position=position_jitterdodge(jitter.width =  0.2), alpha = 0.5) + 
+  facet_wrap(.~bodysite) +
+  theme_light() +
+  labs(title = "Shannon Diversity",y = "Shannon Diversity", x = "Time Point") +
+  scale_fill_manual(values = c( "lavenderblush3", "thistle", "lightsteelblue2")) 
+
+
+summary(aov(data_shannon | (timepoint)~ infxn_id, data = alph_dat))
+#### rectal only
+alph_dat_rec <- alph_dat %>% filter(bodysite == "rectal")
+describe(alph_dat_rec$data_shannon)
+summary(aov(data_shannon | (timepoint)~ infxn_id, data = alph_dat_rec))
+#### rectal only
+alph_dat_vag <- alph_dat %>% filter(bodysite == "vaginal")
+summary(aov(data_shannon | (timepoint)~ infxn_id, data = alph_dat_vag))
+describe(alph_dat_vag$data_shannon)
+```
+
